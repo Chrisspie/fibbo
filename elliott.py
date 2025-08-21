@@ -38,12 +38,24 @@ def _types_ok(seq: List[Pivot], expected: List[str]) -> bool:
     return all(seq[k].kind == expected[k] for k in range(len(expected)))
 
 def _basic_monotonicity_ok(seq: List[Pivot], direction: Direction) -> bool:
+    """
+    Minimalne twarde reguły:
+    - up:  P1 > P0, P2 > P0 (2 nie znosi 1 w 100%), P3 > P1, P4 > P2 (4 nie znosi 3 w 100%), P5 > P3
+    - down: analogicznie odwrotnie
+    """
     if direction == "up":
-        return (seq[1].price > seq[0].price and seq[3].price > seq[2].price and seq[5].price > seq[4].price and
-                seq[2].price > seq[0].price and seq[4].price > seq[1].price)
+        return (seq[1].price > seq[0].price and
+                seq[2].price > seq[0].price and
+                seq[3].price > seq[1].price and
+                seq[4].price > seq[2].price and
+                seq[5].price > seq[3].price)
     else:
-        return (seq[1].price < seq[0].price and seq[3].price < seq[2].price and seq[5].price < seq[4].price and
-                seq[2].price < seq[0].price and seq[4].price < seq[1].price)
+        return (seq[1].price < seq[0].price and
+                seq[2].price < seq[0].price and
+                seq[3].price < seq[1].price and
+                seq[4].price < seq[2].price and
+                seq[5].price < seq[3].price)
+
 
 def detect_impulse(pivots: List[Pivot], direction: Optional[Direction]=None,
                    min_bars_per_wave: int=3, fib_tolerance: float=0.35, overlap_tolerance: float=0.02) -> Optional[ImpulsePattern]:
@@ -70,7 +82,16 @@ def detect_impulse(pivots: List[Pivot], direction: Optional[Direction]=None,
                  _closest_fib_score(e5b,[0.382,0.618,1.0],fib_tolerance))
         pen_short3 = 0.4 if L3 < min(L1,L5) else 0.0
         overlap_ok = (seq[4].price >= seq[1].price*(1.0-overlap_tolerance)) if dir_use=="up" else (seq[4].price <= seq[1].price*(1.0+overlap_tolerance))
-        pen_overlap = 0.0 if overlap_ok else 0.5
+        # Kara za "brak nakładania 4 na 1" – mierzona realną ingerencją w jednostkach ceny
+        if dir_use == "up":
+            overlap_amt = max(0.0, seq[1].price - seq[4].price)  # ile 4 "wchodzi" poniżej szczytu 1
+        else:
+            overlap_amt = max(0.0, seq[4].price - seq[1].price)  # ile 4 "wchodzi" powyżej dołka 1
+
+        # Skala – użyjemy długości fali 3, żeby uzyskać bezwymiarową frakcję; bezpiecznik na zero.
+        overlap_frac = overlap_amt / max(1e-9, L3)
+        # Sufit kary (0.7) – silnie penalizuje duże nakładanie, ale nie zeruje całkiem wyniku
+        pen_overlap = min(0.7, overlap_frac)
         score01 = max(0.0, (0.27*s_r2 + 0.30*s_e3 + 0.20*s_r4 + 0.23*s_e5) - pen_short3 - pen_overlap)
         score = round(100.0*score01, 2)
         details = {"r2":r2,"e3":e3,"r4":r4,"e5":e5,"pen_short3":pen_short3,"pen_overlap":pen_overlap}
